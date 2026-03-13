@@ -204,3 +204,15 @@ export async function releaseMicroModels() {
   }
   _modelCache = {};
 }
+
+/**
+ * Release a single model by name.
+ * @param {string} modelName
+ */
+export function releaseMicroModel(modelName) {
+  const runner = _modelCache[modelName];
+  if (runner) {
+    try { runner.cleanUp(); } catch (_) { /* ignore */ }
+    delete _modelCache[modelName];
+  }
+}
