@@ -42,6 +42,27 @@ export const MICRO_MODEL_PARAMS = {
 let _tfweb = null;
 /** @type {Record<string, object>} name → TFLiteWebModelRunner */
 let _modelCache = {};
+
+// Scoped WebAssembly.Memory patch — reduces TFLite's 32MB initial WASM heap
+// to 8MB (128 pages) for low-memory devices. Applied before WASM loads,
+// restored after the first model instantiation.
+let _origWasmMemory = null;
+
+function _patchWasmMemory() {
+  _origWasmMemory = WebAssembly.Memory;
+  WebAssembly.Memory = function(desc) {
+    if (desc.initial > 128) desc = { ...desc, initial: 128 };     // 8MB
+    if (desc.maximum > 2048) desc = { ...desc, maximum: 2048 };   // 128MB
+    return new _origWasmMemory(desc);
+  };
+}
+
+function _restoreWasmMemory() {
+  if (_origWasmMemory) {
+    WebAssembly.Memory = _origWasmMemory;
+    _origWasmMemory = null;
+  }
+}
 /** @type {Record<string, object>} name → params from companion JSON */
 const _jsonParamsCache = {};
 
@@ -52,6 +73,9 @@ const _jsonParamsCache = {};
  */
 export async function loadTFLite() {
   if (_tfweb) return _tfweb;
+
+  // Cap WASM memory before the runtime loads (restored after first model load)
+  _patchWasmMemory();
 
   // Load via script tag — it's a Closure-compiled script that sets window.tfweb.
   // The script has a CommonJS `exports.tfweb = tfweb` epilogue that needs a stub.
@@ -121,6 +145,8 @@ export async function loadMicroModel(tfweb, modelName, onProgress) {
     tfweb.TFLiteWebModelRunner.create(`${MODELS_BASE}/${filename}.tflite`, { numThreads: 1 }),
     _loadModelManifest(filename),
   ]);
+  // WASM module is now instantiated — safe to restore the original constructor
+  _restoreWasmMemory();
   _modelCache[modelName] = runner;
   return runner;
 }
